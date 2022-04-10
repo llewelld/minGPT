@@ -26,12 +26,12 @@ Note that we enable CPU offloading. Offloading has a huge impact on throughput a
 
 ##### 1.7B (Requires around 2GiB per 8 GPUs, 5.1GiB for 1 GPU)
 ```bash
-python train.py --n_layer 15 --n_head 16 --n_embd 3072 --gpus 8 --precision 16 --batch_size 1 --strategy deepspeed_stage_3
+python train.py --n_layer 15 --n_head 16 --n_embd 3072 --gpus 8 --precision 16 --batch_size 1 --strategy deepspeed_stage_3_offload
 ```
 
 ##### ~10B (Requires around 6GiB per 8 GPUs, 26GiB for 1 GPU)
 ```bash
-python train.py --n_layer 13 --n_head 16 --n_embd 8192 --gpus 8 --precision 16 --batch_size 1 --strategy deepspeed_stage_3
+python train.py --n_layer 13 --n_head 16 --n_embd 8192 --gpus 8 --precision 16 --batch_size 1 --strategy deepspeed_stage_3_offload
 ```
 
 ##### ~20B (Requires around 8GiB per 8 GPUs, OOM for 1 GPU, offloading onto ~500GB of CPU RAM)

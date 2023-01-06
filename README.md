@@ -1,5 +1,7 @@
 # minGPT with Lightning & DeepSpeed
 
+**Lightning now has their own Lightning GPT Example! Highly recommend using their repo [here](https://github.com/Lightning-AI/lightning-GPT).**
+
 ![mingpt](mingpt.jpg)
 
 [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/seannaren/mingpt/streamlit/app.py)

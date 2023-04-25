@@ -1,5 +1,6 @@
 import os
 from argparse import ArgumentParser
+from time import perf_counter
 
 import numpy as np
 from pytorch_lightning import Trainer
@@ -20,6 +21,24 @@ from mingpt.callback import CUDACallback
 from mingpt.lr_decay import LearningRateDecayCallback
 from mingpt.block import Block
 
+
+class Measure():
+    perftime = 0
+    perfcount = 0
+
+    def print_time(self, stage=''):
+        now = perf_counter()
+        if stage:
+            print('Timer stage {}: {}'.format(self.perfcount, stage))
+        else:
+            print('Timer stage {}'.format(self.perfcount))
+        if self.perfcount == 0:
+            print('Starting timer: 0.0 seconds')
+        else:
+            delta = now - self.perftime
+            print('Time delta step: {} seconds'.format(delta))
+        self.perfcount += 1
+        self.perftime = now
 
 class CharDataset(Dataset):
 
@@ -122,6 +141,8 @@ class GPT(pl.LightningModule):
 
 if __name__ == '__main__':
     seed_everything(42)
+    measure = Measure()
+    measure.print_time()
 
     parser = ArgumentParser()
     parser = Trainer.add_argparse_args(parser)
@@ -137,10 +158,12 @@ if __name__ == '__main__':
     if not os.path.exists("input.txt"):
         os.system("wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt")
 
+    measure.print_time('Loading data')
     text = open('input.txt', 'r').read()  # don't worry we won't run out of file handles
     train_dataset = CharDataset(text, args.block_size)  # one line of poem is roughly 50 characters
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, num_workers=args.num_workers)
 
+    measure.print_time('Initialising meta parameters')
     with init_meta_context():
         model = GPT(
             vocab_size=train_dataset.vocab_size,
@@ -157,6 +180,7 @@ if __name__ == '__main__':
         final_tokens=2 * len(train_dataset) * args.block_size
     )
 
+    measure.print_time('Configuring trainer')
     trainer = Trainer.from_argparse_args(
         args,
         max_epochs=10,
@@ -164,4 +188,8 @@ if __name__ == '__main__':
         callbacks=[lr_decay, CUDACallback()],
         precision=16,
     )
+
+    measure.print_time('Fitting')
     trainer.fit(model, train_loader)
+    measure.print_time('Done')
+

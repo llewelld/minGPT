@@ -10,6 +10,7 @@ from pytorch_lightning.utilities import rank_zero_info
 from pytorch_lightning.utilities.meta import init_meta_context
 from torch.utils.data import Dataset, DataLoader
 import math
+import torch.distributed as dist
 
 import deepspeed
 import pytorch_lightning as pl
@@ -20,7 +21,7 @@ from torch.nn import functional as F
 from mingpt.callback import CUDACallback
 from mingpt.lr_decay import LearningRateDecayCallback
 from mingpt.block import Block
-
+from torch.optim import Adam
 
 class Measure():
     perftime = 0
@@ -78,7 +79,8 @@ class GPT(pl.LightningModule):
                  n_layer=12,
                  n_head=4,
                  resid_pdrop=0.1,
-                 attn_pdrop=0.1
+                 attn_pdrop=0.1,
+                 gpus=0,
                  ):
         super().__init__()
         self.save_hyperparameters()
@@ -95,6 +97,8 @@ class GPT(pl.LightningModule):
 
         self.blocks = nn.ModuleList([Block(self.hparams) for _ in range(self.hparams.n_layer)])
 
+        self.gpus = gpus
+
     def configure_optimizers(self):
         no_decay = ["bias", "LayerNorm.weight"]
         params_decay = [p for n, p in self.named_parameters() if not any(nd in n for nd in no_decay)]
@@ -105,9 +109,12 @@ class GPT(pl.LightningModule):
         ]
         # todo: need to enable deepspeed cpu adam only if offloading
 
-        if self.deepspeed_offload:
-            return DeepSpeedCPUAdam(optim_groups, lr=self.hparams.learning_rate, betas=self.hparams.betas)
-        return FusedAdam(optim_groups, lr=self.hparams.learning_rate, betas=self.hparams.betas)
+        if self.gpus > 0:
+            if self.deepspeed_offload:
+                return DeepSpeedCPUAdam(optim_groups, lr=self.hparams.learning_rate, betas=self.hparams.betas)
+            return FusedAdam(optim_groups, lr=self.hparams.learning_rate, betas=self.hparams.betas)
+        else:
+            return Adam(optim_groups, lr=self.hparams.learning_rate, betas=self.hparams.betas)
 
     @property
     def deepspeed_offload(self) -> bool:
@@ -125,8 +132,9 @@ class GPT(pl.LightningModule):
         token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
         position_embeddings = self.pos_emb[:, :t, :] # each position maps to a (learnable) vector
         x = self.drop(token_embeddings + position_embeddings)
-        for block in self.blocks:
-            x = deepspeed.checkpointing.checkpoint(block, x)
+        if self.gpus > 0:
+            for block in self.blocks:
+                x = deepspeed.checkpointing.checkpoint(block, x)
         x = self.ln_f(x)
         logits = self.head(x)
         return logits
@@ -155,6 +163,9 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', default=0, type=int)
     args = parser.parse_args()
 
+    if args.gpus == None:
+        args.gpus = 0
+
     if not os.path.exists("input.txt"):
         os.system("wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt")
 
@@ -171,7 +182,8 @@ if __name__ == '__main__':
             n_layer=args.n_layer,
             n_head=args.n_head,
             n_embd=args.n_embd,
-            learning_rate=args.learning_rate
+            learning_rate=args.learning_rate,
+            gpus=args.gpus
         )
 
     lr_decay = LearningRateDecayCallback(
@@ -185,7 +197,7 @@ if __name__ == '__main__':
         args,
         max_epochs=10,
         gradient_clip_val=1.0,
-        callbacks=[lr_decay, CUDACallback()],
+        callbacks=[lr_decay] + ([CUDACallback()] if args.gpus > 0 else []),
         precision=16,
     )
 

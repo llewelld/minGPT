@@ -71,11 +71,22 @@ if [ -d "$CONDA_ENV_PATH" ]; then
   echo "Conda directory exists, skipping creation"
 else
   echo "Creating environment"
-  conda create -p "${CONDA_ENV_PATH}"
+  conda create -y -p "${CONDA_ENV_PATH}" python=3.9.5
 fi
 
 echo "Activating conda environment"
 conda activate "${CONDA_ENV_PATH}"
+
+echo "Check Python version and location"
+python3 --version
+which python3
+
+echo "Ensure we have pip installed"
+conda install -y pip
+
+echo "Installing requirements"
+python3 -m pip install --upgrade torch==1.11.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
+python3 -m pip install -r requirements.txt
 
 echo
 echo "######################################"

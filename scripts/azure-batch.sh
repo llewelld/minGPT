@@ -43,7 +43,7 @@ else
   echo "https://repo.anaconda.com/minicond/"
   wget https://repo.anaconda.com/miniconda/Miniconda3-py39_4.10.3-Linux-x86_64.sh
   SHA256="1ea2f885b4dbc3098662845560bc64271eb17085387a70c2ba3f29fff6f8d52f"
-  if echo "$SHA256 Miniconda3-py39_4.10.3-Linux-x86_64.s" | sha256sum --check --status; then
+  if echo "$SHA256 Miniconda3-py39_4.10.3-Linux-x86_64.sh" | sha256sum --check --status; then
     echo "Miniconda3 downloaded successfully. Installling.";
   else
     echo "Downloadd Miniconda3 failed sha256 check. Exiting."

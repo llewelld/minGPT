@@ -85,8 +85,8 @@ echo "Ensure we have pip installed"
 conda install -y pip
 
 echo "Installing requirements"
-python3 -m pip install --upgrade torch==1.11.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
-python3 -m pip install -r requirements.txt
+python3 -m pip install --no-cache-dir --upgrade torch==1.11.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
+python3 -m pip install --no-cache-dir -r requirements.txt
 
 echo
 echo "######################################"

@@ -14,6 +14,8 @@ from mingpt.callback import CUDACallback
 from mingpt.lr_decay import LearningRateDecayCallback
 from mingpt.utils import sample
 from mingpt.model import GPT
+from pytorch_lightning.profilers import SimpleProfiler
+from pytorch_lightning.callbacks import DeviceStatsMonitor
 
 
 class CharDataset(Dataset):
@@ -95,15 +97,17 @@ if __name__ == '__main__':
         final_tokens=2 * len(train_dataset) * args.block_size
     )
 
+    profiler = SimpleProfiler(dirpath='.', filename='perf_logs')
     trainer = Trainer(
         max_epochs=args.max_epochs,
         gradient_clip_val=1.0,
-        callbacks=[lr_decay] + ([CUDACallback()] if gpu_support else []),
+        callbacks=[lr_decay, DeviceStatsMonitor()] + ([CUDACallback()] if gpu_support else []),
         precision=args.precision,
         enable_progress_bar=args.enable_progress_bar,
         strategy=args.strategy,
         accelerator=args.accelerator,
         devices=args.devices,
+        profiler=profiler,
     )
     trainer.fit(model, train_loader)
 

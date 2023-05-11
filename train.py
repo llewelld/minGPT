@@ -6,7 +6,6 @@ from pytorch_lightning import Trainer
 from pytorch_lightning import seed_everything
 from pytorch_lightning.strategies import DeepSpeedStrategy
 from pytorch_lightning.utilities import rank_zero_info
-from pytorch_lightning.utilities.meta import init_meta_context
 from torch.utils.data import Dataset, DataLoader
 import math
 from collections import OrderedDict
@@ -21,6 +20,7 @@ from mingpt.callback import CUDACallback
 from mingpt.lr_decay import LearningRateDecayCallback
 from mingpt.block import Block
 from mingpt.utils import sample
+from torch.optim import AdamW
 
 
 class CharDataset(Dataset):
@@ -63,6 +63,7 @@ class GPT(pl.LightningModule):
                  n_head=4,
                  resid_pdrop=0.1,
                  attn_pdrop=0.1,
+                 gpu_support=False,
                  itos=[],
                  ):
         super().__init__()
@@ -78,7 +79,10 @@ class GPT(pl.LightningModule):
 
         self.block_size = self.hparams.block_size
 
+        # transformer
         self.blocks = nn.ModuleList([Block(self.hparams) for _ in range(self.hparams.n_layer)])
+
+        self.gpu_support = gpu_support
 
         # Retain a copy of the vocabulary conversion map for checkpointing purposes
         self.itos = itos
@@ -94,9 +98,12 @@ class GPT(pl.LightningModule):
         ]
         # todo: need to enable deepspeed cpu adam only if offloading
 
-        if self.deepspeed_offload:
-            return DeepSpeedCPUAdam(optim_groups, lr=self.hparams.learning_rate, betas=self.hparams.betas)
-        return FusedAdam(optim_groups, lr=self.hparams.learning_rate, betas=self.hparams.betas)
+        if self.gpu_support:
+            if self.deepspeed_offload:
+                return DeepSpeedCPUAdam(optim_groups, lr=self.hparams.learning_rate, betas=self.hparams.betas)
+            return FusedAdam(optim_groups, lr=self.hparams.learning_rate, betas=self.hparams.betas)
+        else:
+            return AdamW(optim_groups, lr=self.hparams.learning_rate, betas=self.hparams.betas)
 
     @property
     def deepspeed_offload(self) -> bool:
@@ -114,8 +121,9 @@ class GPT(pl.LightningModule):
         token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
         position_embeddings = self.pos_emb[:, :t, :] # each position maps to a (learnable) vector
         x = self.drop(token_embeddings + position_embeddings)
-        for block in self.blocks:
-            x = deepspeed.checkpointing.checkpoint(block, x)
+        if self.gpu_support:
+            for block in self.blocks:
+                x = deepspeed.checkpointing.checkpoint(block, x)
         x = self.ln_f(x)
         logits = self.head(x)
         return logits
@@ -126,6 +134,9 @@ class GPT(pl.LightningModule):
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
         self.log('train_loss', loss)
         return loss
+
+    def get_block_size(self):
+        return self.block_size
 
     def on_save_checkpoint(self, checkpoint):
         # Save out the vocab conversion dictionary to the checkpoint
@@ -146,7 +157,6 @@ if __name__ == '__main__':
     seed_everything(42)
 
     parser = ArgumentParser()
-    parser = Trainer.add_argparse_args(parser)
     parser.add_argument('--n_layer', default=22, type=int)
     parser.add_argument('--n_head', default=16, type=int)
     parser.add_argument('--n_embd', default=3072, type=int)
@@ -154,6 +164,14 @@ if __name__ == '__main__':
     parser.add_argument('--block_size', default=128, type=int)
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--num_workers', default=0, type=int)
+    parser.add_argument('--precision', default=16, type=int)
+    parser.add_argument('--strategy', default='auto')
+    parser.add_argument('--enable_progress_bar', default=True, type=bool)
+    parser.add_argument('--max_epochs', default=10, type=int)
+    parser.add_argument('--accelerator', default="gpu")
+    parser.add_argument('--devices', default=1, type=int)
+    parser.add_argument('--gpus', default=None, type=int)
+
     args = parser.parse_args()
 
     if not os.path.exists("input.txt"):
@@ -163,16 +181,23 @@ if __name__ == '__main__':
     train_dataset = CharDataset(text, args.block_size)  # one line of poem is roughly 50 characters
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, num_workers=args.num_workers)
 
-    with init_meta_context():
-        model = GPT(
-            vocab_size=train_dataset.vocab_size,
-            block_size=train_dataset.block_size,
-            n_layer=args.n_layer,
-            n_head=args.n_head,
-            n_embd=args.n_embd,
-            learning_rate=args.learning_rate,
-            itos=train_dataset.itos,
-        )
+    gpu_support = args.accelerator == 'gpu' and args.devices > 0
+
+    if args.gpus != None:
+        if args.gpus > 0:
+            args.accelerator = 'gpu'
+        args.devices = args.gpus
+
+    model = GPT(
+        vocab_size=train_dataset.vocab_size,
+        block_size=train_dataset.block_size,
+        n_layer=args.n_layer,
+        n_head=args.n_head,
+        n_embd=args.n_embd,
+        learning_rate=args.learning_rate,
+        gpu_support=gpu_support,
+        itos=train_dataset.itos,
+    )
 
     lr_decay = LearningRateDecayCallback(
         learning_rate=6e-4,
@@ -180,12 +205,15 @@ if __name__ == '__main__':
         final_tokens=2 * len(train_dataset) * args.block_size
     )
 
-    trainer = Trainer.from_argparse_args(
-        args,
-        max_epochs=10,
+    trainer = Trainer(
+        max_epochs=args.max_epochs,
         gradient_clip_val=1.0,
-        callbacks=[lr_decay, CUDACallback()],
-        precision=16,
+        callbacks=[lr_decay] + ([CUDACallback()] if gpu_support else []),
+        precision=args.precision,
+        enable_progress_bar=args.enable_progress_bar,
+        strategy=args.strategy,
+        accelerator=args.accelerator,
+        devices=args.devices,
     )
     trainer.fit(model, train_loader)
 

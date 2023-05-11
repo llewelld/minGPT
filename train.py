@@ -20,6 +20,7 @@ from torch.nn import functional as F
 from mingpt.callback import CUDACallback
 from mingpt.lr_decay import LearningRateDecayCallback
 from mingpt.block import Block
+from mingpt.utils import sample
 
 
 class CharDataset(Dataset):
@@ -187,3 +188,12 @@ if __name__ == '__main__':
         precision=16,
     )
     trainer.fit(model, train_loader)
+
+    trainer.save_checkpoint("trained.ckpt")
+
+    context = "By artificial intelligence, or wrong surmise,"
+    x = torch.tensor([model.stoi[s] for s in context], dtype=torch.long)[None,...].to(model.device)
+    y = sample(model, x, 1000, temperature=0.9, sample=True, top_k=5)[0]
+    completion = ''.join([model.itos[int(i)] for i in y])
+    print(completion)
+

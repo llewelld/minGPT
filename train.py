@@ -9,6 +9,7 @@ from pytorch_lightning.utilities import rank_zero_info
 from pytorch_lightning.utilities.meta import init_meta_context
 from torch.utils.data import Dataset, DataLoader
 import math
+from collections import OrderedDict
 
 import deepspeed
 import pytorch_lightning as pl
@@ -24,7 +25,8 @@ from mingpt.block import Block
 class CharDataset(Dataset):
 
     def __init__(self, data, block_size):
-        chars = list(set(data))
+        # Use an OrderedDict to ensure deterministic behaviour
+        chars = list(OrderedDict.fromkeys(data))
         data_size, vocab_size = len(data), len(chars)
         rank_zero_info('data has %d characters, %d unique.' % (data_size, vocab_size))
 

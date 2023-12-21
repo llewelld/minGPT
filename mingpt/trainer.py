@@ -8,6 +8,10 @@ from collections import defaultdict
 
 import torch
 from torch.utils.data.dataloader import DataLoader
+
+# Import intel_extension_for_pytorch
+import intel_extension_for_pytorch as ipex
+
 from mingpt.utils import CfgNode as CN
 
 class Trainer:
@@ -63,6 +67,11 @@ class Trainer:
 
         # setup the optimizer
         self.optimizer = model.configure_optimizers(config)
+
+        # Invoke optimize function against the model object and optimizer object
+        model.eval()
+        model.to('xpu')
+        model, optimizer = ipex.optimize(model, optimizer, dtype=torch.gfloat16)
 
         # setup the dataloader
         train_loader = DataLoader(

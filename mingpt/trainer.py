@@ -71,7 +71,7 @@ class Trainer:
         # Invoke optimize function against the model object and optimizer object
         model.eval()
         model.to('xpu')
-        model, optimizer = ipex.optimize(model, optimizer, dtype=torch.gfloat16)
+        model, optimizer = ipex.optimize(model, optimizer, dtype=torch.bfloat16)
 
         # setup the dataloader
         train_loader = DataLoader(
